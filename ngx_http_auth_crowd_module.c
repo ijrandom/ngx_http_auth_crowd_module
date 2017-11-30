@@ -153,12 +153,7 @@ parse_config_from_json(ngx_http_request_t *r, const char *json, ngx_http_auth_cr
 	return NGX_OK;
 }
 
-int parse_token_from_json(ngx_http_request_t *r, char const *json, char *token, size_t len)
-{
-	const char *tname = "\"token\":\"";
 
-	return parse_name_value(json, tname, token, len, '"');
-}
 
 static size_t read_callback(void *ptr, size_t size, size_t nmemb, void *userp)
 {
@@ -214,7 +209,7 @@ print_cookies(CURL *curl, ngx_log_t *log)
 }
 
 int
-curl_transaction(ngx_http_request_t *r, struct CrowdRequest *crowd_request, int expected_http_code, void *data)
+curl_transaction(ngx_http_request_t *r, struct CrowdRequest *crowd_request, int expected_http_code, int (*callback)(void *context, ngx_http_request_t *r, HttpRequest *request, HttpResponse *response), void *context)
 {
 	struct HttpRequest request;
 	struct HttpResponse response;
@@ -278,11 +273,11 @@ curl_transaction(ngx_http_request_t *r, struct CrowdRequest *crowd_request, int 
 	}
 
 	if (http_code == expected_http_code) {
-		if (data != NULL) {
-			if (!get_config)
-				error_code = parse_token_from_json(r, response.body, data, 128);
-			else
-				error_code = parse_config_from_json(r, response.body, data);
+		if (callback) {
+		    int r = callback(context, &request, &response);
+		    if (r != NGX_OK) {
+		        return r;
+		    }
 		}
 		goto cleanup;
 	} else {
@@ -294,6 +289,28 @@ cleanup:
 	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 	return error_code;
+}
+
+static int config_sso_callback(void *_cc, ngx_http_request_t *r, HttpRequest *request, HttpResponse *response) {
+    // {"domain":".my.domain.fi","secure":false,"name":"my-crowd.token_key"},
+	const char *domain = "\"domain\":\"";
+	const char *name   = "\"name\":\"";
+	const char *secure = "\"secure\":";
+	ngx_http_auth_crowd_ctx_t *cc = _cc;
+	const char *json = response->body;
+	char buff[6];
+	int ec1, ec2, ec3;
+
+	ec1 = parse_name_value(json, domain, cc->domain, 128, '"');
+	ec2 = parse_name_value(json, name, cc->name, 128, '"');
+	ec3 = parse_name_value(json, secure, buff, 6, ',');
+	if (!strcmp(buff, "true"))
+		strcpy(cc->secure, "secure");
+
+	if (ec1 != NGX_OK || ec2 != NGX_OK || ec3 != NGX_OK)
+		return NGX_DECLINED;
+
+	return NGX_OK;
 }
 
 static int
@@ -313,7 +330,16 @@ get_cookie_config(ngx_http_request_t *r, ngx_http_auth_crowd_loc_conf_t  *alcf, 
 	ngx_str_null(&request.body);
 	request.method = 1;
 
-	return curl_transaction(r, &request, 200, cc);
+	return curl_transaction(r, &request, 200, config_sso_callback, cc);
+}
+
+
+static int token_sso_callback(void *_token, ngx_http_request_t *r, HttpRequest *request, HttpResponse *response) {
+    char *token = token;
+    char const *json = response->body;
+	const char *tname = "\"token\":\"";
+
+	return parse_name_value(json, tname, token, len, '"');
 }
 
 int
@@ -339,7 +365,41 @@ create_sso_session(ngx_http_request_t *r, ngx_http_auth_crowd_loc_conf_t *alcf, 
 	request.request_url.len = ngx_strlen(url_buf);
 	request.method = 0;
 
-	return curl_transaction(r, &request, 201, token);
+	return curl_transaction(r, &request, 201, &token_sso_callback, token);
+}
+
+static ngx_int_t
+ngx_http_grafana_set_username(ngx_http_request_t *r, ngx_str_t *username)
+{
+	ngx_table_elt_t *h;
+	h = ngx_list_push(&r->headers_in.headers);
+	if (h == NULL) {
+		return NGX_HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	h->hash = 1;
+	h->key.len = sizeof("X-Crowd-User") - 1;
+	k->key.data = (u_char *) "X-Crowd-User";
+	h->value = *username;
+
+	return NGX_OK;
+}
+
+
+static int
+username_sso_callback(void *unused, ngx_http_request_t *r, HttpRequest *request, HttpResponse *response) {
+    char const *json = response->body;
+    char username[256];
+    int r;
+    ngx_str_t ngx_username;
+
+    r = parse_name_value(json, "\"name\":\"", username, sizeof(username), '"');
+    if (r == NGX_OK) {
+        ngx_username.len = strlen(username);
+        ngx_username.data = username;
+        return ngx_http_grafana_set_username(r, &ngx_username);
+    }
+
 }
 
 int
@@ -362,7 +422,7 @@ validate_sso_session_token(ngx_http_request_t *r, ngx_http_auth_crowd_loc_conf_t
 	request.server_password = alcf->crowd_password;
 	request.method = 0;
 
-	return curl_transaction(r, &request, 200, NULL);
+	return curl_transaction(r, &request, 200, &username_sso_callback, NULL);
 }
 // END CROWD AUTHENTICATION
 
