@@ -274,6 +274,8 @@ static int config_sso_callback(void *_cc, ngx_http_request_t *r, struct HttpRequ
 	char buff[6];
 	int ec1, ec2, ec3;
 
+	fprintf(stderr, "config_sso_callback\n");
+
 	ec1 = parse_name_value(json, domain, cc->domain, 128, '"');
 	ec2 = parse_name_value(json, name, cc->name, 128, '"');
 	ec3 = parse_name_value(json, secure, buff, 6, ',');
@@ -310,9 +312,11 @@ get_cookie_config(ngx_http_request_t *r, ngx_http_auth_crowd_loc_conf_t  *alcf, 
 static int token_sso_callback(void *_token, ngx_http_request_t *r, struct HttpRequest *request, struct HttpResponse *response) {
     char *token = token;
     char const *json = response->body;
-	const char *tname = "\"token\":\"";
 
-	return parse_name_value(json, tname, token, 128, '"');
+
+    fprintf(stderr, "token_sso_callback\n");
+
+	return parse_name_value(json, "\"token\":\"", token, 128, '"');
 }
 
 int
@@ -550,6 +554,7 @@ ngx_http_auth_crowd_handler(ngx_http_request_t *r)
 	if (rc == NGX_DECLINED) {
 		return ngx_http_auth_crowd_set_realm(r, &alcf->realm);
 	}
+	fprintf(stderr, "Basic auth credentials found\n");
 
 	if (rc == NGX_ERROR) {
 		return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -639,8 +644,10 @@ ngx_http_auth_crowd_authenticate(ngx_http_request_t *r, ngx_http_auth_crowd_ctx_
 	uinfo.password.len = r->headers_in.passwd.len;
 
 	char token[128];
+	fprintf(stderr, "Creating new session\n");
 	int status = create_sso_session(r, alcf, &uinfo.username, &uinfo.password, token);
 	if (status == NGX_OK) {
+	    fprintf(stderr, "Setting new session cookie\n");
 		return ngx_http_auth_crowd_set_cookie(r, ctx->name, token, ctx->domain, ctx->secure);
 	}
 
