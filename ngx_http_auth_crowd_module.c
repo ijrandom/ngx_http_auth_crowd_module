@@ -349,17 +349,24 @@ static ngx_int_t
 ngx_http_grafana_set_username(ngx_http_request_t *r, ngx_str_t *username)
 {
 	ngx_table_elt_t *h;
+	u_char *copy;
+
 	h = ngx_list_push(&r->headers_in.headers);
 	if (h == NULL) {
 		return NGX_HTTP_INTERNAL_SERVER_ERROR;
 	}
 
+    copy = ngx_pnalloc(r->pool, username->len + 1);
+    memcpy(copy, username->data, username->len);
+    copy[username->len] = 0;
+
 	h->hash = 1;
 	h->key.len = sizeof("X-Crowd-User") - 1;
 	h->key.data = (u_char *) "X-Crowd-User";
-	h->value = *username;
+	h->value.data = copy;
+	h->value.len = username->len;
 
-    fprintf(stderr, "username set\n");
+    fprintf(stderr, "username set: %s\n", copy);
 	return NGX_OK;
 }
 
