@@ -309,7 +309,8 @@ get_cookie_config(ngx_http_request_t *r, ngx_http_auth_crowd_loc_conf_t  *alcf, 
 }
 
 
-static int token_sso_callback(void *_token, ngx_http_request_t *r, struct HttpRequest *request, struct HttpResponse *response) {
+static int
+token_sso_callback(void *_token, ngx_http_request_t *r, struct HttpRequest *request, struct HttpResponse *response) {
     char *token = _token;
     char const *json = response->body;
 
@@ -317,32 +318,6 @@ static int token_sso_callback(void *_token, ngx_http_request_t *r, struct HttpRe
     fprintf(stderr, "token_sso_callback\n");
 
 	return parse_name_value(json, "\"token\":\"", token, 128, '"');
-}
-
-int
-create_sso_session(ngx_http_request_t *r, ngx_http_auth_crowd_loc_conf_t *alcf, ngx_str_t *username,
-		ngx_str_t *password, char *token)
-{
-	const char *url_template = "%V/rest/usermanagement/latest/session";
-	u_char session_json[256] = { '\0' };
-	u_char url_buf[256]= { '\0' };
-
-	struct CrowdRequest request;
-	request.server_username = alcf->crowd_service;
-	request.server_password = alcf->crowd_password;
-
-	ngx_snprintf(session_json, sizeof(session_json), CROWD_SESSION_JSON_TEMPLATE,
-		username, password, &r->connection->addr_text);
-
-	ngx_snprintf(url_buf, sizeof(url_buf), url_template, &alcf->crowd_url);
-
-	request.body.data = session_json;
-	request.body.len = ngx_strlen(session_json);
-	request.request_url.data = url_buf;
-	request.request_url.len = ngx_strlen(url_buf);
-	request.method = 0;
-
-	return curl_transaction(r, &request, 201, &token_sso_callback, token);
 }
 
 static ngx_int_t
@@ -368,6 +343,37 @@ ngx_http_grafana_set_username(ngx_http_request_t *r, ngx_str_t *username)
 
     fprintf(stderr, "username set: %s\n", copy);
 	return NGX_OK;
+}
+
+int
+create_sso_session(ngx_http_request_t *r, ngx_http_auth_crowd_loc_conf_t *alcf, ngx_str_t *username,
+		ngx_str_t *password, char *token)
+{
+	const char *url_template = "%V/rest/usermanagement/latest/session";
+	u_char session_json[256] = { '\0' };
+	u_char url_buf[256]= { '\0' };
+	int error_code;
+
+	struct CrowdRequest request;
+	request.server_username = alcf->crowd_service;
+	request.server_password = alcf->crowd_password;
+
+	ngx_snprintf(session_json, sizeof(session_json), CROWD_SESSION_JSON_TEMPLATE,
+		username, password, &r->connection->addr_text);
+
+	ngx_snprintf(url_buf, sizeof(url_buf), url_template, &alcf->crowd_url);
+
+	request.body.data = session_json;
+	request.body.len = ngx_strlen(session_json);
+	request.request_url.data = url_buf;
+	request.request_url.len = ngx_strlen(url_buf);
+	request.method = 0;
+
+	error_code = curl_transaction(r, &request, 201, &token_sso_callback, token);
+	if (error_code == NGX_OK) {
+	    return ngx_http_grafana_set_username(r, username);
+	}
+	return error_code;
 }
 
 
