@@ -131,30 +131,6 @@ parse_name_value(const char *json, const char *name, char *value, size_t len, ch
 	return ec;
 }
 
-static int
-parse_config_from_json(ngx_http_request_t *r, const char *json, ngx_http_auth_crowd_ctx_t *cc)
-{
-// {"domain":".my.domain.fi","secure":false,"name":"my-crowd.token_key"},
-	const char *domain = "\"domain\":\"";
-	const char *name   = "\"name\":\"";
-	const char *secure = "\"secure\":";
-	char buff[6];
-	int ec1, ec2, ec3;
-
-	ec1 = parse_name_value(json, domain, cc->domain, 128, '"');
-	ec2 = parse_name_value(json, name, cc->name, 128, '"');
-	ec3 = parse_name_value(json, secure, buff, 6, ',');
-	if (!strcmp(buff, "true"))
-		strcpy(cc->secure, "secure");
-
-	if (ec1 != NGX_OK || ec2 != NGX_OK || ec3 != NGX_OK)
-		return NGX_DECLINED;
-
-	return NGX_OK;
-}
-
-
-
 static size_t read_callback(void *ptr, size_t size, size_t nmemb, void *userp)
 {
 	struct HttpRequest *data = (struct HttpRequest *) userp;
@@ -216,7 +192,6 @@ curl_transaction(ngx_http_request_t *r, struct CrowdRequest *crowd_request, int 
 
 	char error_message[CURL_ERROR_SIZE];
 	u_char server_user_pass[128] = { '\0' };
-	int get_config = 0; /* this is terrible */
 
 	request.body = (char *) crowd_request->body.data;
 	request.length = crowd_request->body.len;
@@ -243,7 +218,7 @@ curl_transaction(ngx_http_request_t *r, struct CrowdRequest *crowd_request, int 
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); /* bounce through login to next page */
 
 	if (crowd_request->method == 1) {
-		get_config = 1;
+
 	} else {
 		curl_easy_setopt(curl, CURLOPT_POST, 1L);
 	}
@@ -274,12 +249,10 @@ curl_transaction(ngx_http_request_t *r, struct CrowdRequest *crowd_request, int 
 
 	if (http_code == expected_http_code) {
 		if (callback) {
-		    int r = callback(context, &request, &response);
-		    if (r != NGX_OK) {
-		        return r;
-		    }
+		    error_code = callback(context, r, &request, &response);
+            goto cleanup;
 		}
-		goto cleanup;
+
 	} else {
 		error_code = NGX_ERROR;
 	}
@@ -339,7 +312,7 @@ static int token_sso_callback(void *_token, ngx_http_request_t *r, struct HttpRe
     char const *json = response->body;
 	const char *tname = "\"token\":\"";
 
-	return parse_name_value(json, tname, token, len, '"');
+	return parse_name_value(json, tname, token, 128, '"');
 }
 
 int
@@ -379,9 +352,10 @@ ngx_http_grafana_set_username(ngx_http_request_t *r, ngx_str_t *username)
 
 	h->hash = 1;
 	h->key.len = sizeof("X-Crowd-User") - 1;
-	k->key.data = (u_char *) "X-Crowd-User";
+	h->key.data = (u_char *) "X-Crowd-User";
 	h->value = *username;
 
+    fprintf(stderr, "username set\n");
 	return NGX_OK;
 }
 
@@ -390,16 +364,18 @@ static int
 username_sso_callback(void *unused, ngx_http_request_t *r, struct HttpRequest *request, struct HttpResponse *response) {
     char const *json = response->body;
     char username[256];
-    int r;
+    int error_code;
     ngx_str_t ngx_username;
 
-    r = parse_name_value(json, "\"name\":\"", username, sizeof(username), '"');
-    if (r == NGX_OK) {
+    fprintf(stderr, "username_sso_callback\n");
+    error_code = parse_name_value(json, "\"name\":\"", username, sizeof(username), '"');
+    if (error_code == NGX_OK) {
+        fprintf(stderr, "username found\n");
         ngx_username.len = strlen(username);
-        ngx_username.data = username;
+        ngx_username.data = (u_char *)username;
         return ngx_http_grafana_set_username(r, &ngx_username);
     }
-
+    return error_code;
 }
 
 int
@@ -557,10 +533,13 @@ ngx_http_auth_crowd_handler(ngx_http_request_t *r)
 	name.len = strlen(ctx->name);
 	rc = ngx_http_auth_crowd_get_token(r, &name,  &token);
 	if (rc != NGX_DECLINED) {
+    	fprintf(stderr, "Token found\n");
 		rc = validate_sso_session_token(r, alcf, &token);
 		if (rc != NGX_OK) {
+		    fprintf(stderr, "Token is invalid\n");
 			return ngx_http_auth_crowd_set_realm(r, &alcf->realm);
 		} else {
+		    fprintf(stderr, "Token is valid\n");
 		    return NGX_OK;
 		}
 	}
