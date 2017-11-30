@@ -310,7 +310,7 @@ get_cookie_config(ngx_http_request_t *r, ngx_http_auth_crowd_loc_conf_t  *alcf, 
 
 
 static int token_sso_callback(void *_token, ngx_http_request_t *r, struct HttpRequest *request, struct HttpResponse *response) {
-    char *token = token;
+    char *token = _token;
     char const *json = response->body;
 
 
