@@ -209,7 +209,7 @@ print_cookies(CURL *curl, ngx_log_t *log)
 }
 
 int
-curl_transaction(ngx_http_request_t *r, struct CrowdRequest *crowd_request, int expected_http_code, int (*callback)(void *context, ngx_http_request_t *r, HttpRequest *request, HttpResponse *response), void *context)
+curl_transaction(ngx_http_request_t *r, struct CrowdRequest *crowd_request, int expected_http_code, int (*callback)(void *context, ngx_http_request_t *r, struct HttpRequest *request, struct HttpResponse *response), void *context)
 {
 	struct HttpRequest request;
 	struct HttpResponse response;
@@ -291,7 +291,7 @@ cleanup:
 	return error_code;
 }
 
-static int config_sso_callback(void *_cc, ngx_http_request_t *r, HttpRequest *request, HttpResponse *response) {
+static int config_sso_callback(void *_cc, ngx_http_request_t *r, struct HttpRequest *request, struct HttpResponse *response) {
     // {"domain":".my.domain.fi","secure":false,"name":"my-crowd.token_key"},
 	const char *domain = "\"domain\":\"";
 	const char *name   = "\"name\":\"";
@@ -334,7 +334,7 @@ get_cookie_config(ngx_http_request_t *r, ngx_http_auth_crowd_loc_conf_t  *alcf, 
 }
 
 
-static int token_sso_callback(void *_token, ngx_http_request_t *r, HttpRequest *request, HttpResponse *response) {
+static int token_sso_callback(void *_token, ngx_http_request_t *r, struct HttpRequest *request, struct HttpResponse *response) {
     char *token = token;
     char const *json = response->body;
 	const char *tname = "\"token\":\"";
@@ -387,7 +387,7 @@ ngx_http_grafana_set_username(ngx_http_request_t *r, ngx_str_t *username)
 
 
 static int
-username_sso_callback(void *unused, ngx_http_request_t *r, HttpRequest *request, HttpResponse *response) {
+username_sso_callback(void *unused, ngx_http_request_t *r, struct HttpRequest *request, struct HttpResponse *response) {
     char const *json = response->body;
     char username[256];
     int r;
